@@ -790,20 +790,24 @@ func TestPersist32C(t *testing.T) {
 
 	leader := cfg.checkOneLeader()
 	cfg.disconnect((leader + 2) % servers)
-
+	DPrintf("-------------------------------------------------disconnect %d", (leader+2)%servers)
 	cfg.one(102, 2, true)
-
 	cfg.crash1((leader + 0) % servers)
+	DPrintf("-------------------------------------------------crash %d", (leader+0)%servers)
 	cfg.crash1((leader + 1) % servers)
+	DPrintf("-------------------------------------------------crash %d", (leader+1)%servers)
 	cfg.connect((leader + 2) % servers)
+	DPrintf("-------------------------------------------------connect %d", (leader+2)%servers)
 	cfg.start1((leader+0)%servers, cfg.applier)
+	DPrintf("-------------------------------------------------start %d", (leader+0)%servers)
 	cfg.connect((leader + 0) % servers)
-
+	DPrintf("-------------------------------------------------connect %d", (leader+0)%servers)
 	cfg.one(103, 2, true)
 
 	cfg.start1((leader+1)%servers, cfg.applier)
+	DPrintf("-------------------------------------------------start %d", (leader+1)%servers)
 	cfg.connect((leader + 1) % servers)
-
+	DPrintf("-------------------------------------------------connect %d", (leader+1)%servers)
 	cfg.one(104, servers, true)
 
 	cfg.end()
@@ -1122,10 +1126,10 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 	defer cfg.cleanup()
 
 	cfg.begin(name)
-
+	// DPrintf("!!!!!!!!!!!!!!!!!begin %s", name)
 	cfg.one(rand.Int(), servers, true)
 	leader1 := cfg.checkOneLeader()
-
+	DPrintf("!!!!!!!!!!!!!!!!!leader1 %d", leader1)
 	for i := 0; i < iters; i++ {
 		victim := (leader1 + 1) % servers
 		sender := leader1
@@ -1136,15 +1140,18 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 
 		if disconnect {
 			cfg.disconnect(victim)
+			DPrintf("!!!!!!!!!!!!!!!!!disconnect %d", victim)
 			cfg.one(rand.Int(), servers-1, true)
 		}
 		if crash {
 			cfg.crash1(victim)
+			DPrintf("!!!!!!!!!!!!!!!!!crash %d", victim)
 			cfg.one(rand.Int(), servers-1, true)
 		}
 
 		// perhaps send enough to get a snapshot
 		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
+		DPrintf("!!!!!!!!!!!!!!!!!nn %d", nn)
 		for i := 0; i < nn; i++ {
 			cfg.rafts[sender].Start(rand.Int())
 		}
@@ -1166,12 +1173,14 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			// reconnect a follower, who maybe behind and
 			// needs to rceive a snapshot to catch up.
 			cfg.connect(victim)
+			DPrintf("!!!!!!!!!!!!!!!!!connect %d", victim)
 			cfg.one(rand.Int(), servers, true)
 			leader1 = cfg.checkOneLeader()
 		}
 		if crash {
 			cfg.start1(victim, cfg.applierSnap)
 			cfg.connect(victim)
+			DPrintf("!!!!!!!!!!!!!!!!!connect %d", victim)
 			cfg.one(rand.Int(), servers, true)
 			leader1 = cfg.checkOneLeader()
 		}
