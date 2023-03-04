@@ -339,7 +339,7 @@ type AppendEntriesReply struct {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	DPrintf("===AppendEntries===leader:%d,rf:%d,", args.LeaderID, rf.me)
+	DPrintf("===AppendEntries===leader:%d,rf:%d,term:%d", args.LeaderID, rf.me, args.Term)
 	reply.UpNextIndex = -1
 	reply.AppState = AppNormal
 	reply.Term = rf.currentTerm
@@ -381,7 +381,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if rf.restoreLogTerm(args.PrevLogIndex) != args.PrevLogTerm {
 			reply.Success = false
 			reply.AppState = Mismatch
-			reply.AppState = rf.lastApplied + 1
+			reply.UpNextIndex = rf.lastApplied + 1
 			// reply.UpNextIndex = rf.getLastIndex()
 			// tmpTerm := rf.restoreLogTerm(args.PrevLogIndex)
 			// for index := args.PrevLogIndex; index >= rf.lastIncludedIndex; index-- {
@@ -399,7 +399,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 		reply.AppState = Mismatch
 		reply.UpNextIndex = rf.lastApplied + 1
-		DPrintf("===func AppendEntries===leader:%d to %d Mismatch. prevLogIndex:%d,receiver.logsLen:%d", args.LeaderID, rf.me, args.PrevLogIndex, len(rf.logEntries))
+		DPrintf("===func AppendEntries===leader:%d to %d Mismatch. prevLogIndex:%d,receiver.logsLen:%d", args.LeaderID, rf.me, args.PrevLogIndex, len(rf.logEntries)-1)
 		return
 	}
 
@@ -419,7 +419,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.persist()
 
 	// If leaderCommit > commitIndex, set commitIndex =min(leaderCommit, index of last new entry)
-	rf.commitIndex = min(args.LeaderCommit, rf.getLastIndex())
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = min(args.LeaderCommit, rf.getLastIndex())
+	}
 	reply.Success = true
 }
 
@@ -453,20 +455,20 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	switch reply.AppState {
 	case AppKilled:
 		{
-			DPrintf("===func sendAppendEntries===leader:%d->killed", rf.me)
+			DPrintf("===func sendAppendEntries===leader:%d server %d->killed", rf.me, server)
 			return
 		}
 	case AppNormal:
 		{
 			DPrintf("===func sendAppendEntries===reply:appNormal")
 			if reply.Success {
-				rf.commitIndex = rf.lastIncludedIndex
+				rf.commitIndex = rf.lastApplied
 				rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
 				rf.nextIndex[server] = rf.matchIndex[server] + 1
 			}
 			// DPrintf("lastapplied+1:%d,len(logEntries):%d", rf.lastApplied+1, len(rf.logEntries))
 			canApplyIndex := rf.lastApplied
-			DPrintf("%d %d", rf.getLastIndex(), rf.lastApplied)
+			// DPrintf("%d %d", rf.getLastIndex(), rf.lastApplied)
 			for i := rf.getLastIndex(); i > rf.lastIncludedIndex; i-- {
 
 				if rf.restoreLogTerm(i) == rf.currentTerm {
@@ -476,8 +478,8 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 							cnt++
 						}
 					}
-					DPrintf("===logs=== index:%d,cnt:%d", i, cnt)
 					if cnt > len(rf.peers)/2 {
+						DPrintf("===logs=== index:%d,cnt:%d", i, cnt)
 						canApplyIndex = i
 						break
 					}
@@ -487,7 +489,6 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		}
 	case Mismatch, AppCommitted:
 		{
-
 			rf.nextIndex[server] = reply.UpNextIndex
 		}
 	}
@@ -806,7 +807,7 @@ func (rf *Raft) electionTicker() {
 	// fmt.Println(rf.me, ":ticker start!")
 	for !rf.killed() {
 		rand.Seed(time.Now().UnixNano())
-		randNum := rand.Intn(200) + 150
+		randNum := rand.Intn(200) + 200
 		nowTime := time.Now()
 		time.Sleep(time.Millisecond * time.Duration(randNum))
 		rf.mu.Lock()
@@ -839,7 +840,7 @@ func (rf *Raft) committedTicker() {
 				CommandIndex:  rf.lastApplied,
 				Command:       rf.restoreLog(rf.lastApplied).Command,
 			})
-			DPrintf("===logs=== index:%d,start to apply", rf.lastApplied)
+			DPrintf("===logs===rf:%d  index:%d,start to apply", rf.me, rf.lastApplied)
 		}
 		rf.mu.Unlock()
 
