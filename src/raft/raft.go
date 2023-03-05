@@ -58,8 +58,8 @@ const (
 	StateFollower    = 1
 	StateCandidate   = 2
 	StateLeader      = 3
-	heartbeatTimeout = 100
-	AppliedSleep     = 30
+	heartbeatTimeout = 35
+	AppliedSleep     = 10
 )
 
 const (
@@ -807,7 +807,7 @@ func (rf *Raft) electionTicker() {
 	// fmt.Println(rf.me, ":ticker start!")
 	for !rf.killed() {
 		rand.Seed(time.Now().UnixNano())
-		randNum := rand.Intn(200) + 200
+		randNum := rand.Intn(100) + 75
 		nowTime := time.Now()
 		time.Sleep(time.Millisecond * time.Duration(randNum))
 		rf.mu.Lock()
