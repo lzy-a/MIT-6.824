@@ -58,7 +58,7 @@ const (
 	StateFollower    = 1
 	StateCandidate   = 2
 	StateLeader      = 3
-	heartbeatTimeout = 35
+	heartbeatTimeout = 30
 	AppliedSleep     = 10
 )
 
@@ -428,7 +428,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	DPrintf("--sendAppendEntries--from:%dto%d", rf.me, server)
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-	for !ok {
+	if !ok {
 		if rf.killed() {
 			// DPrintf("%d was killed", rf.me)
 			return
@@ -615,8 +615,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
 	index := rf.getLastIndex() + 1
 	//+1?
 
@@ -625,11 +623,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	// Your code here (2B).
 	if !isLeader {
+		rf.mu.Unlock()
 		return index, term, isLeader
 	}
 	rf.logEntries = append(rf.logEntries, LogEntry{Term: term, Command: command})
-	// go rf.leaderHeartBeatOnce()
 	rf.persist()
+
+	rf.mu.Unlock()
+	// rf.leaderHeartBeatOnce()
 	return index, term, isLeader
 }
 
@@ -710,6 +711,7 @@ func (rf *Raft) sendElection() {
 							rf.votedTimer = time.Now()
 							rf.persist()
 							rf.leaderInit()
+							// go rf.leaderHeartBeatOnce()
 							DPrintf("%d becomes a Leader, term:%d", rf.me, rf.currentTerm)
 						}
 					}
@@ -735,8 +737,9 @@ func (rf *Raft) leaderHeartBeatOnce() {
 	DPrintf("%d starts to appendEntries.term:%d ,commitIndex:%d,logsLen:%d", rf.me, rf.currentTerm, rf.commitIndex, len(rf.logEntries)-1)
 	// matchIndex:=rf.matchIndex
 	n := len(rf.peers)
+	state := rf.state
 	rf.mu.Unlock()
-	if rf.state != StateLeader {
+	if state != StateLeader {
 		return
 	}
 	for i := 0; i < n; i++ {
@@ -807,7 +810,7 @@ func (rf *Raft) electionTicker() {
 	// fmt.Println(rf.me, ":ticker start!")
 	for !rf.killed() {
 		rand.Seed(time.Now().UnixNano())
-		randNum := rand.Intn(100) + 75
+		randNum := rand.Intn(75) + 100
 		nowTime := time.Now()
 		time.Sleep(time.Millisecond * time.Duration(randNum))
 		rf.mu.Lock()

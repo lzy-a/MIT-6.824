@@ -4,14 +4,21 @@ package shardctrler
 // Shardctrler clerk.
 //
 
-import "6.824/labrpc"
-import "time"
-import "crypto/rand"
-import "math/big"
+import (
+	"crypto/rand"
+	"math/big"
+	"time"
 
+	"6.824/labrpc"
+)
+
+// lab4
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// Your data here.
+	clientId   int64
+	seqId      int
+	lastLeader int
 }
 
 func nrand() int64 {
@@ -25,31 +32,38 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// Your code here.
+	ck.clientId = nrand()
+	ck.seqId = 0
+	ck.lastLeader = 0
 	return ck
 }
 
 func (ck *Clerk) Query(num int) Config {
+	ck.seqId++
 	args := &QueryArgs{}
 	// Your code here.
 	args.Num = num
+	args.ClintId = ck.clientId
+	args.SeqId = ck.seqId
 	for {
 		// try each known server.
-		for _, srv := range ck.servers {
-			var reply QueryReply
-			ok := srv.Call("ShardCtrler.Query", args, &reply)
-			if ok && reply.WrongLeader == false {
-				return reply.Config
-			}
+		srv := ck.servers[ck.lastLeader]
+		var reply QueryReply
+		ok := srv.Call("ShardCtrler.Query", args, &reply)
+		if ok && !reply.WrongLeader {
+			return reply.Config
 		}
-		time.Sleep(100 * time.Millisecond)
+		ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
 	}
 }
 
 func (ck *Clerk) Join(servers map[int][]string) {
+	ck.seqId++
 	args := &JoinArgs{}
 	// Your code here.
 	args.Servers = servers
-
+	args.ClintId = ck.clientId
+	args.SeqId = ck.seqId
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
@@ -64,10 +78,12 @@ func (ck *Clerk) Join(servers map[int][]string) {
 }
 
 func (ck *Clerk) Leave(gids []int) {
+	ck.seqId++
 	args := &LeaveArgs{}
 	// Your code here.
 	args.GIDs = gids
-
+	args.ClintId = ck.clientId
+	args.SeqId = ck.seqId
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
@@ -82,11 +98,13 @@ func (ck *Clerk) Leave(gids []int) {
 }
 
 func (ck *Clerk) Move(shard int, gid int) {
+	ck.seqId++
 	args := &MoveArgs{}
 	// Your code here.
 	args.Shard = shard
 	args.GID = gid
-
+	args.ClintId = ck.clientId
+	args.SeqId = ck.seqId
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {

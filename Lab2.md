@@ -1,5 +1,65 @@
 # Lab2 
 
+### 评测结果
+
+```
+(base) liuziyang@liuziyangdeMacBook-Air raft % go test -run=2 
+Test (2A): initial election ...
+  ... Passed --   3.1  3   60   16214    0
+Test (2A): election after network failure ...
+  ... Passed --   4.5  3  152   29034    0
+Test (2A): multiple elections ...
+  ... Passed --   5.3  7  586  117264    0
+Test (2B): basic agreement ...
+  ... Passed --   0.9  3   16    4320    3
+Test (2B): RPC byte count ...
+  ... Passed --   2.5  3   46  113124   11
+Test (2B): agreement after follower reconnects ...
+  ... Passed --   6.2  3  142   36682    8
+Test (2B): no agreement if too many followers disconnect ...
+  ... Passed --   3.6  5  238   46077    3
+Test (2B): concurrent Start()s ...
+  ... Passed --   0.8  3   14    3836    6
+Test (2B): rejoin of partitioned leader ...
+  ... Passed --   6.5  3  221   53941    4
+Test (2B): leader backs up quickly over incorrect follower logs ...
+  ... Passed --  26.8  5 6602 5978261  102
+Test (2B): RPC counts aren't too high ...
+  ... Passed --   2.3  3   42   11924   12
+Test (2C): basic persistence ...
+  ... Passed --   4.2  3   87   21215    6
+Test (2C): more persistence ...
+  ... Passed --  17.1  5 1158  241210   16
+Test (2C): partitioned leader and one follower crash, leader restarts ...
+  ... Passed --   2.1  3   38    9424    4
+Test (2C): Figure 8 ...
+  ... Passed --  30.6  5  982  205362   30
+Test (2C): unreliable agreement ...
+  ... Passed --   5.3  5  251   83182  246
+Test (2C): Figure 8 (unreliable) ...
+  ... Passed --  33.7  5 10000 15330250  377
+Test (2C): churn ...
+  ... Passed --  16.2  5 1121  578257  117
+Test (2C): unreliable churn ...
+  ... Passed --  16.5  5  866  390341   79
+Test (2D): snapshots basic ...
+  ... Passed --   6.9  3  134   46590  215
+Test (2D): install snapshots (disconnect) ...
+  ... Passed --  79.5  3 1983  695470  313
+Test (2D): install snapshots (disconnect+unreliable) ...
+  ... Passed --  70.1  3 2199  775320  353
+Test (2D): install snapshots (crash) ...
+  ... Passed --  37.6  3  741  352809  328
+Test (2D): install snapshots (unreliable+crash) ...
+  ... Passed --  39.3  3  900  408002  343
+Test (2D): crash and restart all servers ...
+  ... Passed --  12.0  3  232   65346   52
+PASS
+ok      6.824/raft      434.123s
+```
+
+### 分析笔记
+
 服务器上的共识模块从客户端接收命令并将其添加到日志中。它与其他服务器上的共识模块进行通信，以确保每个日志最终都以相同的顺序包含相同的请求，即使某些服务器出现故障。一旦命令被正确复制，每个服务器的状态机都会按照日志顺序处理它们，输出将返回给客户端。
 
 
@@ -68,7 +128,7 @@ Raft通过首先选举一名不同的leader，然后让leader完全负责管理�
 
   (3) When the entry has been **safely replicated **（需要被**多数**follower复制好）, the leader **applies the entry to its state machine** and **returns the result** of that execution to the client. （这里严格保证顺序，不可以并行）
 
-  (4) If **followers crash** or run slowly, or if network packets are lost, the leader retries AppendEntries RPCs **indefinitely** (even after it has responded to the client) until all followers eventually store all log entries.（如果leader换人了，新的leader也要继续广播直到所有人都填好，所以要有一个list记录谁没填好？）
+  (4) If **followers crash** or run slowly, or if network packets are lost, the leader retries AppendEntries RPCs **indefinitely**（直到不是leader？） (even after it has responded to the client) until all followers eventually store all log entries.（如果leader换人了，新的leader也要继续广播直到所有人都填好，所以要有一个list记录谁没填好？）
 
 - **log**
 
@@ -125,7 +185,7 @@ Raft通过首先选举一名不同的leader，然后让leader完全负责管理�
 
   - If RPC request or response contains term `T > currentTerm`: set `currentTerm = T`, convert to follower.
 
-  ==？？？==如果已经投票了，但遇到了更大的term要怎么回复？下面这段看不懂：
+  如果已经投票了，但遇到了更大的term要怎么回复？要更新term并投票。
 
   > For example, if you have already voted in the current term, and an incoming `RequestVote` RPC has a higher term that you, you should *first* step down and adopt their term (thereby resetting `votedFor`), and *then* handle the RPC, which will result in you granting the vote! 
 
@@ -142,7 +202,6 @@ Raft通过首先选举一名不同的leader，然后让leader完全负责管理�
 
   update `matchIndex` to be `prevLogIndex + len(entries[])` from the arguments you sent in the RPC originally.
 
-  ==不明觉厉==
 
 
 
@@ -150,6 +209,28 @@ Raft通过首先选举一名不同的leader，然后让leader完全负责管理�
 
 - heartbeat 100ms
 - 选举计时在1s之内
+- start函数append logEntry随后发送appendEntries到所有人
 
+## Debug
 
+### Debug1：
 
+Leader 2获得1,4的选票，并且成功在1,4上复制了1-12号index的log entry，由于在多数节点复制了log，于是将这些entry apply到自己的主机上，此时crash.（1,4并未获得提交的通知）term:22
+
+此时3重新连接，当选leader，term:24，然后直接crash
+
+此时2重新连接，当选leader，term:27，然后直接crash
+
+此时0重新连接，当选leader，term:29，commitIndex:0,logsLen:12
+
+发送appendEntries，与1,4 MisMatch
+
+0调整nextindex值，重新向1,4发送appendEntries，成功覆盖了2在1,4上复制的log，完成复制后提交，此时发现2与0提交的entry不同
+
+##### 解决：leader只能在本任期提交过log才能提交之前任期的log
+
+### Debug2
+
+follower只有投出赞同票才reset timer，而不是在发现有更大的任期的rpc就reset timer。
+
+如果不遵守这条原则，会出现这样的情况：follower拥有更小的term和更新的log，由于一直被candidate重置时钟，一直无法参与竞选，同时candidate由于日志不够新又无法得到足够多的选票。这样不但会消耗大量的rpc资源，甚至会导致一直无法选出正确leader的超时现象。
